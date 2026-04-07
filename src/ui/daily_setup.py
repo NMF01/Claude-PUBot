@@ -6,6 +6,7 @@ from .styles import (
     COLORS, get_font, create_button, create_lang_button,
     t, current_lang, set_lang,
 )
+from .settings import SettingsDialog
 
 
 class DailySetupWindow:
@@ -18,11 +19,13 @@ class DailySetupWindow:
 
     MAX_LEN = 100
 
-    def __init__(self, parent: tk.Tk, storage, on_complete):
+    def __init__(self, parent: tk.Tk, storage, ai_client, on_complete):
         self.storage     = storage
+        self.ai_client   = ai_client
         self.on_complete = on_complete
 
         # Widget refs updated by _apply_lang()
+        self._lbl_page_hdr:   tk.Label | None = None
         self._lbl_title:      tk.Label | None = None
         self._lbl_subtitle:   tk.Label | None = None
         self._lbl_task_names: list[tk.Label]  = []
@@ -62,12 +65,30 @@ class DailySetupWindow:
         outer = tk.Frame(self.win, bg=COLORS['bg'], padx=44, pady=28)
         outer.pack(fill='both', expand=True)
 
-        # ── Top row: language toggle ───────────────────────────────────────
+        # ── Top row: gear + language toggle ───────────────────────────────
         top_row = tk.Frame(outer, bg=COLORS['bg'])
         top_row.pack(fill='x', pady=(0, 6))
 
         self._btn_lang = create_lang_button(top_row, self._toggle_lang)
         self._btn_lang.pack(side='right')
+
+        gear_btn = tk.Button(
+            top_row, text='⚙',
+            command=self._open_settings,
+            bg=COLORS['bg'], fg=COLORS['text_muted'],
+            font=get_font('label'),
+            relief='flat', bd=0, padx=4, cursor='hand2',
+            activebackground=COLORS['bg'], activeforeground=COLORS['accent'],
+        )
+        gear_btn.pack(side='left')
+
+        # ── Page header ───────────────────────────────────────────────────
+        self._lbl_page_hdr = tk.Label(
+            outer, text=t('page_header'),
+            font=get_font('label'), bg=COLORS['bg'],
+            fg=COLORS['accent'], anchor='w',
+        )
+        self._lbl_page_hdr.pack(fill='x', pady=(0, 8))
 
         # ── Header ────────────────────────────────────────────────────────
         tk.Frame(outer, bg=COLORS['accent'], height=4, width=56).pack(anchor='w', pady=(0, 12))
@@ -183,6 +204,9 @@ class DailySetupWindow:
 
     # ── Language toggle ───────────────────────────────────────────────────
 
+    def _open_settings(self):
+        SettingsDialog(self.win, self.storage, self.ai_client)
+
     def _toggle_lang(self):
         new = 'he' if current_lang() == 'en' else 'en'
         set_lang(new)
@@ -197,7 +221,10 @@ class DailySetupWindow:
         anchor  = 'e' if rtl else 'w'
         justify = 'right' if rtl else 'left'
 
-        # Header labels
+        # Page header + header labels
+        self._lbl_page_hdr.configure(
+            text=t('page_header'), anchor=anchor, font=get_font('label'),
+        )
         self._lbl_title.configure(
             text=t('setup_title'), anchor=anchor, font=get_font('heading'),
         )

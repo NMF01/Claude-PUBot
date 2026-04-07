@@ -117,6 +117,14 @@ STRINGS: dict[str, dict] = {
             '20': '20 min', '30': '30 min', '60': '1 hour', '90': '90 min',
         },
         'reminders_line':'reminders every',
+        # page header
+        'page_header':   'My daily focus list.',
+        # settings dialog
+        'settings_title': 'Settings',
+        'api_key_label':  'Claude API Key',
+        'api_key_hint':   'Paste your Anthropic key (sk-ant-…) to enable personalised coaching.',
+        'save_btn':       'Save',
+        'cancel_btn':     'Cancel',
         # toggle button text (shown when THIS is the CURRENT language)
         'lang_btn':      'עב',
     },
@@ -147,6 +155,14 @@ STRINGS: dict[str, dict] = {
             '20': '20 דקות', '30': '30 דקות', '60': 'שעה', '90': '90 דקות',
         },
         'reminders_line':'תזכורות כל',
+        # page header
+        'page_header':   'המיקוד היומי שלי...',
+        # settings dialog
+        'settings_title': 'הגדרות',
+        'api_key_label':  'מפתח Claude API',
+        'api_key_hint':   'הדבק את מפתח ה-API של Anthropic (sk-ant-…) כדי לאפשר אימון מותאם אישית.',
+        'save_btn':       'שמור',
+        'cancel_btn':     'ביטול',
         # toggle button text (shown when THIS is the CURRENT language)
         'lang_btn':      'EN',
     },

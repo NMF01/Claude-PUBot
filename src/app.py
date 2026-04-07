@@ -114,6 +114,7 @@ class PUBotApp:
         DailySetupWindow(
             parent=self.root,
             storage=self.storage,
+            ai_client=self.ai_client,
             on_complete=self._after_setup,
         )
 
