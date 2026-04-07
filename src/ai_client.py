@@ -20,6 +20,17 @@ _FALLBACKS = [
     "One task at a time, one step at a time. You've got this — stay the course.",
 ]
 
+_FALLBACKS_HE = [
+    "כל צעד קדימה, גם הקטן ביותר, מקרב אותך למטרה. המשך!",
+    "התמקד בהתקדמות, לא בשלמות. אתה עושה עבודה נהדרת — משימה אחת בכל פעם.",
+    "הסוד להצלחה הוא להתחיל. כבר התחלת — המשך איתו.",
+    "עקביות היא המפתח להישגים. שמור את עיניך על שלוש המשימות.",
+    "יש לך את הכוח לגרום להיום להשפיע. הישאר מחויב למה שחשוב.",
+    "שיפורים יומיומיים קטנים מובילים לתוצאות מרשימות לטווח הארוך. המשך לדחוף!",
+    "המאמץ הממוקד שלך היום בונה את המחר שאתה רוצה. תישאר חזק!",
+    "משימה אחת בכל פעם, צעד אחד בכל פעם. אתה יכול — הישאר במסלול.",
+]
+
 
 class AIClient:
     def __init__(self, api_key: str = ''):
@@ -46,6 +57,7 @@ class AIClient:
         tasks: list[str],
         completed: list[bool],
         callback: Callable[[str, Optional[str]], None],
+        lang: str = 'en',
     ) -> None:
         """Asynchronously fetch a motivational message, then call callback(msg, err)."""
 
@@ -53,7 +65,7 @@ class AIClient:
             try:
                 client = self._get_client()
                 if not client:
-                    callback(self._fallback(), None)
+                    callback(self._fallback(lang), None)
                     return
 
                 done_count = sum(completed)
@@ -70,6 +82,11 @@ class AIClient:
                     "Be genuine and specific — not generic. "
                     "No quotes, no markdown, just the message."
                 )
+                if lang == 'he':
+                    prompt += (
+                        "\n\nRespond entirely in Hebrew (עברית). "
+                        "Use natural, warm Israeli Hebrew."
+                    )
                 response = client.messages.create(
                     model='claude-opus-4-6',
                     max_tokens=150,
@@ -77,11 +94,12 @@ class AIClient:
                 )
                 callback(response.content[0].text.strip(), None)
             except Exception as exc:
-                callback(self._fallback(), str(exc))
+                callback(self._fallback(lang), str(exc))
 
         threading.Thread(target=_fetch, daemon=True).start()
 
-    def _fallback(self) -> str:
-        msg = _FALLBACKS[self._cycle % len(_FALLBACKS)]
+    def _fallback(self, lang: str = 'en') -> str:
+        pool = _FALLBACKS_HE if lang == 'he' else _FALLBACKS
+        msg = pool[self._cycle % len(pool)]
         self._cycle += 1
         return msg

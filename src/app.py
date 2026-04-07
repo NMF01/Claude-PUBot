@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .storage import Storage, LOCK_FILE
 from .ai_client import AIClient
+from .ui import styles as _styles
 from .ui.daily_setup import DailySetupWindow
 from .ui.reminder import ReminderWindow
 
@@ -20,6 +21,7 @@ class PUBotApp:
 
         self.storage    = Storage()
         cfg             = self.storage.get_config()
+        _styles.set_lang(cfg.get('lang', 'en'))
         self.ai_client  = AIClient(cfg.get('api_key', ''))
 
         # Invisible root window — just owns the event loop and child Toplevels
