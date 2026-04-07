@@ -1,4 +1,18 @@
-"""Periodic reminder popup — shows tasks, progress, and an AI coaching message."""
+"""Periodic reminder popup — shows tasks, progress, and an AI coaching message.
+
+Design contract
+───────────────
+* The X button and any "save and close" shortcut are DISABLED.
+  The only legal exits are:
+    1. Click "Remind me later"  → window closes, reminder reschedules.
+    2. Tick all 3 tasks         → celebration screen appears, then window
+                                   auto-closes after a countdown (or user
+                                   clicks the close button). No more reminders
+                                   until tomorrow.
+* While the window is open it stays topmost and re-grabs focus every 500 ms
+  so the user cannot switch away without acknowledging their tasks.
+  (Focus is released while the Settings dialog is open.)
+"""
 import tkinter as tk
 from datetime import datetime
 
@@ -8,13 +22,11 @@ from .styles import (
 )
 from .settings import SettingsDialog
 
+_CELEBRATION_COUNTDOWN = 6   # seconds before auto-close on celebration screen
+
 
 class ReminderWindow:
-    """Shown every N minutes to check in on the user's 3 daily tasks.
-
-    Features a language toggle (EN ↔ עב) with RTL support.
-    The AI coaching message is re-fetched in the new language when toggled.
-    """
+    """Shown every N minutes to check in on the user's 3 daily tasks."""
 
     def __init__(self, parent: tk.Tk, storage, ai_client, on_close):
         self.storage    = storage
@@ -26,25 +38,27 @@ class ReminderWindow:
         self._done_badges:  list[tk.Label | None] = []
 
         # Refs updated by _apply_lang()
-        self._lbl_page_hdr:    tk.Label | None = None
-        self._lbl_title:       tk.Label | None = None
-        self._lbl_dateline:    tk.Label | None = None
-        self._lbl_tasks_hdr:   tk.Label | None = None
-        self._lbl_progress:    tk.Label | None = None
-        self._lbl_alldone:     tk.Label | None = None
-        self._lbl_coach:       tk.Label | None = None
-        self._ai_lbl:          tk.Label | None = None
-        self._btn_remind:      tk.Button | None = None
-        self._btn_save:        tk.Button | None = None
-        self._btn_lang:        tk.Button | None = None
-        self._bar_outer:       tk.Frame | None = None
-        self._bar_inner:       tk.Frame | None = None
+        self._lbl_page_hdr:  tk.Label | None = None
+        self._lbl_title:     tk.Label | None = None
+        self._lbl_dateline:  tk.Label | None = None
+        self._lbl_tasks_hdr: tk.Label | None = None
+        self._lbl_progress:  tk.Label | None = None
+        self._lbl_alldone:   tk.Label | None = None
+        self._lbl_coach:     tk.Label | None = None
+        self._ai_lbl:        tk.Label | None = None
+        self._btn_remind:    tk.Button | None = None
+        self._btn_lang:      tk.Button | None = None
+        self._bar_outer:     tk.Frame | None = None
+
+        # State flags
+        self._settings_open:    bool = False
+        self._celebration_shown: bool = False
+        self._outer:            tk.Frame | None = None
 
         self.data = self.storage.get_today_tasks()
         if not self.data:
             return
 
-        # Store for _apply_lang() regeneration of the date line
         self._now      = datetime.now()
         self._interval = self.data.get('reminder_interval', 60)
 
@@ -53,16 +67,20 @@ class ReminderWindow:
         win.configure(bg=COLORS['bg'])
         win.resizable(False, False)
         win.attributes('-topmost', True)
-        win.protocol('WM_DELETE_WINDOW', lambda: self._close(remind_later=True))
+        # X button does nothing — user must interact with the window
+        win.protocol('WM_DELETE_WINDOW', lambda: None)
         self.win = win
 
         self._center(530, 620)
         self._build()
         win.grab_set()
         win.focus_force()
+
+        # Periodic focus enforcement
+        win.after(500, self._keep_on_top)
         self._fetch_ai_message()
 
-    # ── Layout ────────────────────────────────────────────────────────────
+    # ── Layout helpers ────────────────────────────────────────────────────
 
     def _center(self, w: int, h: int):
         self.win.update_idletasks()
@@ -70,12 +88,15 @@ class ReminderWindow:
         sh = self.win.winfo_screenheight()
         self.win.geometry(f'{w}x{h}+{(sw - w)//2}+{(sh - h)//2}')
 
+    # ── Main build ────────────────────────────────────────────────────────
+
     def _build(self):
         tasks     = self.data['tasks']
         completed = self.data['completed']
 
         outer = tk.Frame(self.win, bg=COLORS['bg'], padx=34, pady=24)
         outer.pack(fill='both', expand=True)
+        self._outer = outer
 
         # ── Top row: gear + lang toggle ───────────────────────────────────
         top_row = tk.Frame(outer, bg=COLORS['bg'])
@@ -102,7 +123,7 @@ class ReminderWindow:
         )
         self._lbl_page_hdr.pack(fill='x', pady=(0, 6))
 
-        # ── Header ────────────────────────────────────────────────────────
+        # ── Title row ─────────────────────────────────────────────────────
         hdr = tk.Frame(outer, bg=COLORS['bg'])
         hdr.pack(fill='x')
 
@@ -165,12 +186,10 @@ class ReminderWindow:
         self._bar_outer = tk.Frame(outer, bg=COLORS['progress_bg'], height=7)
         self._bar_outer.pack(fill='x', pady=(6, 0))
         self._bar_outer.pack_propagate(False)
-        self._bar_inner = None
         if total > 0 and done_count > 0:
-            self._bar_inner = tk.Frame(
-                self._bar_outer, bg=COLORS['progress_fill'], height=7,
+            tk.Frame(self._bar_outer, bg=COLORS['progress_fill'], height=7).place(
+                relwidth=done_count / total, relheight=1.0,
             )
-            self._bar_inner.place(relwidth=done_count / total, relheight=1.0)
 
         # ── AI coaching card ──────────────────────────────────────────────
         tk.Frame(outer, bg=COLORS['divider'], height=1).pack(fill='x', pady=(10, 8))
@@ -192,23 +211,25 @@ class ReminderWindow:
         )
         self._ai_lbl.pack(fill='x')
 
-        # ── Buttons ───────────────────────────────────────────────────────
+        # ── Bottom button — "Remind me later" only ────────────────────────
         tk.Frame(outer, bg=COLORS['divider'], height=1).pack(fill='x', pady=(12, 12))
 
         btn_row = tk.Frame(outer, bg=COLORS['bg'])
         btn_row.pack(fill='x')
 
+        note = tk.Label(
+            btn_row,
+            text='✓ Tick a task as done, or',
+            font=get_font('small'), bg=COLORS['bg'], fg=COLORS['text_dim'],
+        )
+        note.pack(side='left', pady=(2, 0))
+        self._lbl_remind_note = note
+
         self._btn_remind = create_button(
             btn_row, t('remind_later'),
             lambda: self._close(remind_later=True), style='secondary',
         )
-        self._btn_remind.pack(side='left')
-
-        self._btn_save = create_button(
-            btn_row, t('save_close'),
-            lambda: self._close(remind_later=False), style='primary',
-        )
-        self._btn_save.pack(side='right')
+        self._btn_remind.pack(side='right')
 
     def _build_task_row(self, parent, idx: int, task: str, done: bool, icon: str):
         row = tk.Frame(parent, bg=COLORS['surface_alt'], padx=12, pady=10)
@@ -250,10 +271,46 @@ class ReminderWindow:
 
         var.trace_add('write', lambda *_a, i=idx: self._on_task_toggled(i))
 
-    # ── Language toggle ───────────────────────────────────────────────────
+    # ── Focus enforcement ─────────────────────────────────────────────────
+
+    def _keep_on_top(self):
+        """Runs every 500 ms; re-lifts and re-grabs focus unless settings open."""
+        if not self.win.winfo_exists():
+            return
+        if not self._settings_open and not self._celebration_shown:
+            try:
+                self.win.lift()
+                self.win.attributes('-topmost', True)
+                self.win.focus_force()
+                self.win.grab_set()
+            except tk.TclError:
+                pass
+        elif self._celebration_shown:
+            try:
+                self.win.lift()
+                self.win.attributes('-topmost', True)
+            except tk.TclError:
+                pass
+        self.win.after(500, self._keep_on_top)
+
+    # ── Settings dialog ───────────────────────────────────────────────────
 
     def _open_settings(self):
-        SettingsDialog(self.win, self.storage, self.ai_client)
+        self._settings_open = True
+        dlg = SettingsDialog(self.win, self.storage, self.ai_client)
+        dlg.win.bind('<Destroy>', lambda _e: self._on_settings_closed(), add='+')
+
+    def _on_settings_closed(self):
+        self._settings_open = False
+        if self.win.winfo_exists():
+            try:
+                self.win.grab_set()
+                self.win.lift()
+                self.win.focus_force()
+            except tk.TclError:
+                pass
+
+    # ── Language toggle ───────────────────────────────────────────────────
 
     def _toggle_lang(self):
         new = 'he' if current_lang() == 'en' else 'en'
@@ -262,13 +319,12 @@ class ReminderWindow:
         cfg['lang'] = new
         self.storage.save_config(cfg)
         self._apply_lang()
-        # Re-fetch AI message in new language
         self._ai_lbl.configure(text=t('loading'), fg=COLORS['text_muted'],
                                font=get_font('body_italic'))
         self._fetch_ai_message()
 
     def _apply_lang(self):
-        """Update all stored widget texts and alignments for the active language."""
+        """Update all stored widget texts/alignments for the active language."""
         rtl     = current_lang() == 'he'
         anchor  = 'e' if rtl else 'w'
         justify = 'right' if rtl else 'left'
@@ -285,49 +341,37 @@ class ReminderWindow:
         self._lbl_tasks_hdr.configure(
             text=t('tasks_header'), anchor=anchor, font=get_font('label'),
         )
-
-        # Task label text direction (task text itself stays as entered by user)
         for lbl in self._task_labels:
             lbl.configure(anchor=anchor, justify=justify, font=get_font('body'))
-
-        # Done badges
         for badge in self._done_badges:
             if badge:
                 badge.configure(text=t('done_badge'), font=get_font('small'))
 
-        # Progress
         done_count = sum(v.get() for v in self._check_vars)
         total      = len(self._check_vars)
         self._lbl_progress.configure(
             text=t('progress', done=done_count, total=total),
             anchor=anchor, font=get_font('body'),
         )
-        if self._lbl_alldone:
-            self._lbl_alldone.configure(
-                text=f"  {t('all_done')}", font=get_font('body'),
-            )
-
-        # AI card
+        self._lbl_alldone.configure(
+            text=f"  {t('all_done')}", font=get_font('body'),
+        )
         self._lbl_coach.configure(
             text=t('coach_label'), anchor=anchor, font=get_font('small'),
         )
         self._ai_lbl.configure(anchor=anchor, justify=justify, font=get_font('body_italic'))
-
-        # Buttons
         self._btn_remind.configure(text=t('remind_later'), font=get_font('button'))
-        self._btn_save.configure(text=t('save_close'), font=get_font('button'))
         self._btn_lang.configure(text=t('lang_btn'), font=get_font('lang_btn'))
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
     def _make_dateline(self) -> str:
-        """Build the date + reminder frequency line in the current language."""
         day  = self._now.day
         date = f"{self._now.strftime('%A, %B')} {day}"
         intv = t('interval_text').get(str(self._interval), str(self._interval))
         return f"{date}  ·  {t('reminders_line')} {intv}"
 
-    # ── Callbacks ─────────────────────────────────────────────────────────
+    # ── Task callbacks ────────────────────────────────────────────────────
 
     def _on_check_changed(self):
         pass  # trace_add handles updates
@@ -338,6 +382,11 @@ class ReminderWindow:
             fg=COLORS['text_dim'] if done else COLORS['text'],
         )
         self._refresh_progress()
+        if sum(v.get() for v in self._check_vars) == len(self._check_vars):
+            # Save and trigger celebration after a brief moment so the
+            # checkbox tick animation renders first.
+            self.storage.update_completion([v.get() for v in self._check_vars])
+            self.win.after(350, self._show_celebration)
 
     def _refresh_progress(self):
         done_count = sum(v.get() for v in self._check_vars)
@@ -346,18 +395,110 @@ class ReminderWindow:
             text=t('progress', done=done_count, total=total),
             fg=COLORS['success'] if done_count == total else COLORS['text_muted'],
         )
-        # Redraw bar
         for child in self._bar_outer.winfo_children():
             child.destroy()
         if total > 0 and done_count > 0:
             tk.Frame(self._bar_outer, bg=COLORS['progress_fill'], height=7).place(
                 relwidth=done_count / total, relheight=1.0,
             )
-        # Show / hide "All done" label
         if done_count == total:
             self._lbl_alldone.pack(side='left')
         else:
             self._lbl_alldone.pack_forget()
+
+    # ── Celebration screen ────────────────────────────────────────────────
+
+    def _show_celebration(self):
+        if not self.win.winfo_exists():
+            return
+        self._celebration_shown = True
+
+        # Hide the task content
+        if self._outer:
+            self._outer.pack_forget()
+
+        bg = COLORS['celebration_bg']
+        frame = tk.Frame(self.win, bg=bg)
+        frame.pack(fill='both', expand=True, padx=0, pady=0)
+
+        # Top accent stripe
+        tk.Frame(frame, bg=COLORS['accent'], height=6).pack(fill='x')
+
+        inner = tk.Frame(frame, bg=bg, padx=40, pady=30)
+        inner.pack(fill='both', expand=True)
+
+        # Big emoji
+        tk.Label(
+            inner, text=t('celebration_emoji'),
+            font=(get_font('celebration_h')[0], 52),
+            bg=bg,
+        ).pack(pady=(0, 8))
+
+        # Title
+        tk.Label(
+            inner, text=t('celebration_title'),
+            font=get_font('celebration_h'), bg=bg, fg=COLORS['accent'],
+        ).pack(pady=(0, 6))
+
+        # Subtitle
+        tk.Label(
+            inner, text=t('celebration_sub'),
+            font=get_font('celebration_s'), bg=bg, fg=COLORS['text'],
+        ).pack(pady=(0, 4))
+
+        # Full progress bar
+        bar_outer = tk.Frame(inner, bg=COLORS['progress_bg'], height=10)
+        bar_outer.pack(fill='x', pady=(10, 14))
+        bar_outer.pack_propagate(False)
+        tk.Frame(bar_outer, bg=COLORS['progress_fill'], height=10).place(
+            relwidth=1.0, relheight=1.0,
+        )
+
+        # Body text
+        tk.Label(
+            inner, text=t('celebration_body'),
+            font=get_font('body'), bg=bg, fg=COLORS['text_muted'],
+            justify='center',
+        ).pack(pady=(0, 18))
+
+        tk.Frame(inner, bg=COLORS['divider'], height=1).pack(fill='x', pady=(0, 14))
+
+        # Countdown label
+        self._lbl_countdown = tk.Label(
+            inner, text=t('celebration_countdown', n=_CELEBRATION_COUNTDOWN),
+            font=get_font('small'), bg=bg, fg=COLORS['text_dim'],
+        )
+        self._lbl_countdown.pack(pady=(0, 8))
+
+        # Close button (appears immediately — user can click early)
+        create_button(
+            inner, t('celebration_close'),
+            lambda: self._close(remind_later=False), style='success',
+        ).pack(pady=(0, 4))
+
+        # Start countdown
+        self._countdown_val = _CELEBRATION_COUNTDOWN
+        self.win.after(1000, self._tick_countdown)
+
+        # Release the focus grab so the user can see the celebration properly
+        try:
+            self.win.grab_release()
+        except tk.TclError:
+            pass
+
+    def _tick_countdown(self):
+        if not self.win.winfo_exists() or self._celebration_shown is False:
+            return
+        self._countdown_val -= 1
+        if self._countdown_val <= 0:
+            self._close(remind_later=False)
+            return
+        self._lbl_countdown.configure(
+            text=t('celebration_countdown', n=self._countdown_val),
+        )
+        self.win.after(1000, self._tick_countdown)
+
+    # ── AI message ────────────────────────────────────────────────────────
 
     def _fetch_ai_message(self):
         tasks     = self.data['tasks']
@@ -380,8 +521,16 @@ class ReminderWindow:
                 justify='right' if rtl else 'left',
             )
 
+    # ── Close ─────────────────────────────────────────────────────────────
+
     def _close(self, remind_later: bool):
-        completed = [v.get() for v in self._check_vars]
-        self.storage.update_completion(completed)
+        if not self.win.winfo_exists():
+            return
+        if self._check_vars:
+            self.storage.update_completion([v.get() for v in self._check_vars])
+        try:
+            self.win.grab_release()
+        except tk.TclError:
+            pass
         self.win.destroy()
         self.on_close(remind_later=remind_later)

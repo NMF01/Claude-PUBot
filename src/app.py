@@ -141,9 +141,14 @@ class PUBotApp:
     def _after_reminder(self, remind_later: bool = True):
         self._reminder_up = False
         tasks = self.storage.get_today_tasks()
-        if tasks:
-            interval_ms = tasks.get('reminder_interval', 60) * 60_000
-            self.root.after(interval_ms, self._show_reminder)
+        if not tasks:
+            return
+        # All tasks done — user has been shown the celebration screen;
+        # stop scheduling reminders until tomorrow.
+        if all(tasks.get('completed', [])):
+            return
+        interval_ms = tasks.get('reminder_interval', 60) * 60_000
+        self.root.after(interval_ms, self._show_reminder)
 
     # ── Entry point ───────────────────────────────────────────────────────
 

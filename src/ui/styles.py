@@ -36,22 +36,25 @@ COLORS = {
     'progress_fill': '#16a34a',
     'progress_bg':   '#dcfce7',
     'card_bg':       '#f0faf0',
+    'celebration_bg':'#f0fdf4',   # very light mint for celebration screen
 }
 
 # ── Font specs — (size, *attrs) without family ────────────────────────────
 # get_font() injects the right family for the active language.
 
 FONT_SPECS: dict[str, tuple] = {
-    'heading':      (22, 'bold'),
-    'title':        (17, 'bold'),
-    'subtitle':     (12,),
-    'label':        (11, 'bold'),
-    'body':         (11,),
-    'body_italic':  (11, 'italic'),
-    'small':        (9,),
-    'button':       (11, 'bold'),
-    'counter':      (9,),
-    'lang_btn':     (9, 'bold'),
+    'heading':       (22, 'bold'),
+    'title':         (17, 'bold'),
+    'subtitle':      (12,),
+    'label':         (11, 'bold'),
+    'body':          (11,),
+    'body_italic':   (11, 'italic'),
+    'small':         (9,),
+    'button':        (11, 'bold'),
+    'counter':       (9,),
+    'lang_btn':      (9, 'bold'),
+    'celebration_h': (26, 'bold'),
+    'celebration_s': (13,),
 }
 
 # Convenience alias kept for any code that imports FONTS directly
@@ -125,6 +128,13 @@ STRINGS: dict[str, dict] = {
         'api_key_hint':   'Paste your Anthropic key (sk-ant-…) to enable personalised coaching.',
         'save_btn':       'Save',
         'cancel_btn':     'Cancel',
+        # celebration screen
+        'celebration_emoji':   '🎉',
+        'celebration_title':   'You did it!',
+        'celebration_sub':     'All 3 focus tasks completed for today.',
+        'celebration_body':    'Reminders will pause until tomorrow morning.\nEnjoy the rest of your day!',
+        'celebration_close':   'Close & Finish  ✓',
+        'celebration_countdown': 'Closing in {n}…',
         # toggle button text (shown when THIS is the CURRENT language)
         'lang_btn':      'עב',
     },
@@ -163,6 +173,13 @@ STRINGS: dict[str, dict] = {
         'api_key_hint':   'הדבק את מפתח ה-API של Anthropic (sk-ant-…) כדי לאפשר אימון מותאם אישית.',
         'save_btn':       'שמור',
         'cancel_btn':     'ביטול',
+        # celebration screen
+        'celebration_emoji':   '🎉',
+        'celebration_title':   'כל הכבוד!',
+        'celebration_sub':     'כל 3 המשימות היומיות הושלמו.',
+        'celebration_body':    'התזכורות יופסקו עד מחר בבוקר.\nתיהנה משאר היום!',
+        'celebration_close':   'סגור וסיים  ✓',
+        'celebration_countdown': 'נסגר בעוד {n}…',
         # toggle button text (shown when THIS is the CURRENT language)
         'lang_btn':      'EN',
     },
