@@ -1,10 +1,12 @@
 """Main application controller — orchestrates startup checks and reminder scheduling."""
 import os
 import sys
+import socket as _socket
 import atexit
+import logging
 import platform
 import tkinter as tk
-from datetime import datetime
+from datetime import datetime, date
 
 from .storage import Storage, LOCK_FILE
 from .ai_client import AIClient
@@ -12,11 +14,17 @@ from .ui import styles as _styles
 from .ui.daily_setup import DailySetupWindow
 from .ui.reminder import ReminderWindow
 
+# Loopback port used as a single-instance lock.
+# A bound TCP socket is automatically released by the OS when the process
+# dies for any reason — unlike a PID file which can become stale.
+_LOCK_PORT = 47384
+
 
 class PUBotApp:
     """Hidden background app that owns all popup windows and the scheduling loop."""
 
     def __init__(self):
+        self._lock_sock: _socket.socket | None = None
         self._enforce_single_instance()
 
         self.storage    = Storage()
@@ -34,8 +42,12 @@ class PUBotApp:
         except tk.TclError:
             pass
 
+        # Log (but don't crash) any exception raised inside a tkinter callback
+        self.root.report_callback_exception = _log_callback_exception
+
         self._setup_shown   = False
         self._reminder_up   = False
+        self._current_date  = date.today()   # for day-rollover detection
 
         # Start check 1 s after mainloop begins
         self.root.after(1_000, self._startup_check)
@@ -45,31 +57,34 @@ class PUBotApp:
     # ── Single-instance guard ─────────────────────────────────────────────
 
     def _enforce_single_instance(self):
+        """Bind a loopback TCP port as a cross-platform single-instance lock.
+
+        The OS automatically releases the port when the process dies for any
+        reason (crash, kill, shutdown), eliminating stale-lock false positives.
+        """
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        # SO_REUSEADDR must be OFF so the bind truly signals exclusive ownership
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 0)
+        try:
+            sock.bind(('127.0.0.1', _LOCK_PORT))
+            sock.listen(1)
+            self._lock_sock = sock
+        except OSError:
+            sock.close()
+            logging.info('Another PUBot instance is running — exiting.')
+            sys.exit(0)
+
+        # Write PID for diagnostic purposes only (not used for locking)
         LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if LOCK_FILE.exists():
-            try:
-                pid = int(LOCK_FILE.read_text().strip())
-                self._pid_exists(pid)   # raises if dead
-                print(f'PUBot already running (PID {pid}). Exiting.')
-                sys.exit(0)
-            except (ValueError, OSError):
-                pass  # stale lock
         LOCK_FILE.write_text(str(os.getpid()))
         atexit.register(self._cleanup)
 
-    @staticmethod
-    def _pid_exists(pid: int):
-        """Raise OSError if the PID does not correspond to a running process."""
-        if platform.system() == 'Windows':
-            import ctypes
-            handle = ctypes.windll.kernel32.OpenProcess(0x0400, False, pid)
-            if not handle:
-                raise OSError('dead')
-            ctypes.windll.kernel32.CloseHandle(handle)
-        else:
-            os.kill(pid, 0)   # raises ProcessLookupError if dead
-
     def _cleanup(self):
+        if self._lock_sock:
+            try:
+                self._lock_sock.close()
+            except Exception:
+                pass
         try:
             LOCK_FILE.unlink(missing_ok=True)
         except Exception:
@@ -83,7 +98,6 @@ class PUBotApp:
         hour = cfg.get('start_hour', 6)
 
         if now.hour < hour:
-            # Sleep until start_hour
             secs = (hour - now.hour) * 3600 - now.minute * 60 - now.second
             self.root.after(max(secs * 1000, 60_000), self._startup_check)
             return
@@ -97,12 +111,23 @@ class PUBotApp:
             self.root.after(interval_ms, self._show_reminder)
 
     def _tick(self):
-        """Called every minute to catch day-rollover and missed setups."""
+        """Called every minute — catches day-rollover and missed setups."""
         now = datetime.now()
         cfg = self.storage.get_config()
+
+        # Day has rolled over: reset flags so tomorrow's morning popup fires
+        today = date.today()
+        if today != self._current_date:
+            logging.info('Day rollover detected (%s → %s); resetting setup flag.',
+                         self._current_date, today)
+            self._current_date = today
+            self._setup_shown  = False
+            self._reminder_up  = False
+
         if now.hour >= cfg.get('start_hour', 6) and not self._setup_shown:
             if not self.storage.get_today_tasks():
                 self._show_setup()
+
         self.root.after(60_000, self._tick)
 
     # ── Windows ───────────────────────────────────────────────────────────
@@ -111,6 +136,7 @@ class PUBotApp:
         if self._setup_shown:
             return
         self._setup_shown = True
+        logging.info('Showing daily setup window.')
         DailySetupWindow(
             parent=self.root,
             storage=self.storage,
@@ -131,6 +157,7 @@ class PUBotApp:
         if not tasks:
             return
         self._reminder_up = True
+        logging.info('Showing reminder window.')
         ReminderWindow(
             parent=self.root,
             storage=self.storage,
@@ -143,9 +170,8 @@ class PUBotApp:
         tasks = self.storage.get_today_tasks()
         if not tasks:
             return
-        # All tasks done — user has been shown the celebration screen;
-        # stop scheduling reminders until tomorrow.
         if all(tasks.get('completed', [])):
+            logging.info('All tasks complete — stopping reminders for today.')
             return
         interval_ms = tasks.get('reminder_interval', 60) * 60_000
         self.root.after(interval_ms, self._show_reminder)
@@ -157,3 +183,15 @@ class PUBotApp:
             self.root.mainloop()
         except KeyboardInterrupt:
             self._cleanup()
+
+
+def _log_callback_exception(exc_type, exc_val, exc_tb):
+    """Replace tkinter's default stderr dump with a logged entry.
+
+    The app keeps running — only the individual callback is aborted.
+    """
+    import traceback
+    logging.error(
+        'Unhandled exception in tkinter callback:\n%s',
+        ''.join(traceback.format_exception(exc_type, exc_val, exc_tb)),
+    )

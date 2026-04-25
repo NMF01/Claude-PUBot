@@ -14,8 +14,20 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DATA_DIR   = Path.home() / '.pubot'
-PYTHON     = sys.executable
+WATCHDOG   = SCRIPT_DIR / 'watchdog.py'
 MAIN_PY    = SCRIPT_DIR / 'main.py'
+
+# On Windows prefer pythonw.exe (no console window that the user can
+# accidentally close, killing the background process).
+def _python_exe() -> str:
+    if platform.system() != 'Windows':
+        return sys.executable
+    pythonw = sys.executable.replace('python.exe', 'pythonw.exe')
+    if os.path.exists(pythonw):
+        return pythonw
+    return sys.executable
+
+PYTHON = _python_exe()
 
 
 # ── Banner ────────────────────────────────────────────────────────────────
@@ -164,7 +176,7 @@ def persist_macos():
         f'    <key>ProgramArguments</key>\n'
         f'    <array>\n'
         f'        <string>{PYTHON}</string>\n'
-        f'        <string>{MAIN_PY}</string>\n'
+        f'        <string>{WATCHDOG}</string>\n'
         f'    </array>\n'
         f'    <key>RunAtLoad</key><true/>\n'
         f'    <key>KeepAlive</key><false/>\n'
@@ -184,6 +196,12 @@ def persist_macos():
 
 def persist_windows():
     print('── Setting up autostart (Windows) ─────────────────────')
+    # Register the WATCHDOG (not main.py directly).  The watchdog restarts
+    # PUBot automatically on crash, eliminating "stops after a few hours".
+    cmd = f'"{PYTHON}" "{WATCHDOG}"'
+
+    # 1. Registry Run key — runs at every login
+    reg_ok = False
     try:
         import winreg
         key = winreg.OpenKey(
@@ -191,10 +209,10 @@ def persist_windows():
             r'Software\Microsoft\Windows\CurrentVersion\Run',
             0, winreg.KEY_SET_VALUE,
         )
-        winreg.SetValueEx(key, 'PUBot', 0, winreg.REG_SZ,
-                          f'"{PYTHON}" "{MAIN_PY}"')
+        winreg.SetValueEx(key, 'PUBot', 0, winreg.REG_SZ, cmd)
         winreg.CloseKey(key)
-        print('✓ Registry Run key added')
+        print('✓ Registry Run key added (watchdog)')
+        reg_ok = True
     except Exception as exc:
         print(f'  Registry failed ({exc}); trying Startup folder…')
         startup = (Path(os.environ.get('APPDATA', ''))
@@ -202,30 +220,54 @@ def persist_windows():
                    / 'Programs' / 'Startup')
         if startup.exists():
             bat = startup / 'PUBot.bat'
-            bat.write_text(f'@echo off\nstart "" "{PYTHON}" "{MAIN_PY}"\n')
+            bat.write_text(
+                f'@echo off\n'
+                f'start "" "{PYTHON}" "{WATCHDOG}"\n'
+            )
             print(f'✓ Startup batch file : {bat}')
+
+    # 2. Scheduled Task — fires at login with a 30 s delay, as a backup in
+    #    case the Registry Run key is removed by an antivirus or group policy.
+    try:
+        result = subprocess.run(
+            [
+                'schtasks', '/Create', '/F',
+                '/TN', 'PUBotWatchdog',
+                '/TR', cmd,
+                '/SC', 'ONLOGON',
+                '/DELAY', '0000:30',   # 30-second delay after login
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            print('✓ Scheduled Task created  (PUBotWatchdog, ONLOGON +30 s)')
+        else:
+            # schtasks may need elevation for /ONLOGON — not critical
+            print('  Scheduled Task skipped (may need elevated prompt)')
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        print('  Scheduled Task skipped (schtasks not available)')
     print()
 
 
 # ── Launch ────────────────────────────────────────────────────────────────
 
 def launch():
-    log = DATA_DIR / 'pubot.log'
+    log     = DATA_DIR / 'pubot.log'
     os_name = platform.system()
     try:
         if os_name == 'Windows':
             subprocess.Popen(
-                [PYTHON, str(MAIN_PY)],
+                [PYTHON, str(WATCHDOG)],
                 creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
             )
         else:
             with open(log, 'a') as lf:
                 subprocess.Popen(
-                    [PYTHON, str(MAIN_PY)],
+                    [PYTHON, str(WATCHDOG)],
                     start_new_session=True,
                     stdout=lf, stderr=subprocess.STDOUT,
                 )
-        print('✓ PUBot started in background')
+        print('✓ PUBot started in background (via watchdog)')
     except Exception as exc:
         print(f'  Could not start PUBot: {exc}')
 
