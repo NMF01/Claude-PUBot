@@ -21,6 +21,7 @@ from .styles import (
     t, current_lang, set_lang,
 )
 from .settings import SettingsDialog
+from . import desktop_lock
 
 _CELEBRATION_COUNTDOWN = 6   # seconds before auto-close on celebration screen
 
@@ -73,6 +74,12 @@ class ReminderWindow:
 
         self._center(530, 620)
         self._build()
+
+        # Lock the desktop — blackout is created first, popup lifted above it.
+        self._blackout = desktop_lock.lock(parent)
+        if self._blackout:
+            win.lift()
+
         win.grab_set()
         win.focus_force()
 
@@ -279,7 +286,7 @@ class ReminderWindow:
             return
         if not self._settings_open and not self._celebration_shown:
             try:
-                self.win.lift()
+                self.win.lift()   # stays above the blackout overlay
                 self.win.attributes('-topmost', True)
                 self.win.focus_force()
                 self.win.grab_set()
@@ -480,7 +487,9 @@ class ReminderWindow:
         self._countdown_val = _CELEBRATION_COUNTDOWN
         self.win.after(1000, self._tick_countdown)
 
-        # Release the focus grab so the user can see the celebration properly
+        # Release the focus grab and desktop lock — user has earned their
+        # desktop back by completing all tasks.
+        desktop_lock.unlock()
         try:
             self.win.grab_release()
         except tk.TclError:
@@ -528,6 +537,7 @@ class ReminderWindow:
             return
         if self._check_vars:
             self.storage.update_completion([v.get() for v in self._check_vars])
+        desktop_lock.unlock()   # idempotent — safe if already unlocked by celebration
         try:
             self.win.grab_release()
         except tk.TclError:

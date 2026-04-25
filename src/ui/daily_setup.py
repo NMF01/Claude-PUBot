@@ -7,6 +7,7 @@ from .styles import (
     t, current_lang, set_lang,
 )
 from .settings import SettingsDialog
+from . import desktop_lock
 
 
 class DailySetupWindow:
@@ -50,6 +51,13 @@ class DailySetupWindow:
 
         self._center(640, 760)
         self._build()
+
+        # Lock the desktop before showing — blackout must be created first,
+        # then the popup lifted above it.
+        blackout = desktop_lock.lock(parent)
+        if blackout:
+            win.lift()          # ensure popup sits above the blackout overlay
+
         win.grab_set()
         win.focus_force()
 
@@ -315,5 +323,6 @@ class DailySetupWindow:
             return
         interval = int(self._interval_var.get())
         self.storage.save_today_tasks(tasks, reminder_interval=interval)
+        desktop_lock.unlock()
         self.win.destroy()
         self.on_complete()
