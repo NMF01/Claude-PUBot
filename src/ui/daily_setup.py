@@ -1,6 +1,7 @@
 """Morning popup — collects 3 daily focus tasks from the user."""
 import tkinter as tk
 from tkinter import messagebox
+from datetime import datetime
 
 from .styles import (
     COLORS, get_font, create_button, create_lang_button,
@@ -36,6 +37,7 @@ class DailySetupWindow:
         self._btn_lang:       tk.Button | None = None
         self._submit_btn:     tk.Button | None = None
 
+        self._clock_lbl:     tk.Label | None    = None
         self._entry_vars:    list[tk.StringVar] = []
         self._entry_widgets: list[tk.Entry]     = []
         self._char_labels:   list[tk.Label]     = []
@@ -90,16 +92,27 @@ class DailySetupWindow:
         )
         gear_btn.pack(side='left')
 
-        # ── Page header ───────────────────────────────────────────────────
+        # ── Page header + live clock (same row) ──────────────────────────
+        ph_row = tk.Frame(outer, bg=COLORS['bg'])
+        ph_row.pack(fill='x', pady=(0, 4))
+
         self._lbl_page_hdr = tk.Label(
-            outer, text=t('page_header'),
+            ph_row, text=t('page_header'),
             font=get_font('label'), bg=COLORS['bg'],
             fg=COLORS['accent'], anchor='w',
         )
-        self._lbl_page_hdr.pack(fill='x', pady=(0, 8))
+        self._lbl_page_hdr.pack(side='left')
+
+        self._clock_lbl = tk.Label(
+            ph_row, text=self._fmt_clock(),
+            font=get_font('clock'), bg=COLORS['bg'],
+            fg=COLORS['text'], anchor='e',
+        )
+        self._clock_lbl.pack(side='right')
+        self.win.after(60_000, self._tick_clock)
 
         # ── Header ────────────────────────────────────────────────────────
-        tk.Frame(outer, bg=COLORS['accent'], height=4, width=56).pack(anchor='w', pady=(0, 12))
+        tk.Frame(outer, bg=COLORS['accent'], height=4, width=56).pack(anchor='w', pady=(4, 12))
 
         self._lbl_title = tk.Label(
             outer, text=t('setup_title'),
@@ -274,6 +287,18 @@ class DailySetupWindow:
 
         # Lang toggle button label (shows the OTHER language)
         self._btn_lang.configure(text=t('lang_btn'), font=get_font('lang_btn'))
+
+    # ── Live clock ────────────────────────────────────────────────────────
+
+    def _fmt_clock(self) -> str:
+        now = datetime.now()
+        return now.strftime('%H:%M') if current_lang() == 'he' else now.strftime('%I:%M %p').lstrip('0')
+
+    def _tick_clock(self):
+        if not self.win.winfo_exists():
+            return
+        self._clock_lbl.configure(text=self._fmt_clock())
+        self.win.after(60_000, self._tick_clock)
 
     # ── Callbacks ─────────────────────────────────────────────────────────
 

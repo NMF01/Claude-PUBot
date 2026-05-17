@@ -140,11 +140,12 @@ class ReminderWindow:
         )
         self._lbl_title.pack(side='left')
 
-        time_str = self._now.strftime('%I:%M %p').lstrip('0')
-        tk.Label(
-            hdr, text=time_str,
-            font=get_font('subtitle'), bg=COLORS['bg'], fg=COLORS['text_muted'],
-        ).pack(side='right')
+        self._clock_lbl = tk.Label(
+            hdr, text=self._fmt_clock(),
+            font=get_font('clock'), bg=COLORS['bg'], fg=COLORS['text'],
+        )
+        self._clock_lbl.pack(side='right')
+        self.win.after(60_000, self._tick_clock)
 
         self._lbl_dateline = tk.Label(
             outer, text=self._make_dateline(),
@@ -278,6 +279,18 @@ class ReminderWindow:
 
         var.trace_add('write', lambda *_a, i=idx: self._on_task_toggled(i))
 
+    # ── Live clock ────────────────────────────────────────────────────────
+
+    def _fmt_clock(self) -> str:
+        now = datetime.now()
+        return now.strftime('%H:%M') if current_lang() == 'he' else now.strftime('%I:%M %p').lstrip('0')
+
+    def _tick_clock(self):
+        if not self.win.winfo_exists():
+            return
+        self._clock_lbl.configure(text=self._fmt_clock())
+        self.win.after(60_000, self._tick_clock)
+
     # ── Focus enforcement ─────────────────────────────────────────────────
 
     def _keep_on_top(self):
@@ -369,6 +382,7 @@ class ReminderWindow:
         self._ai_lbl.configure(anchor=anchor, justify=justify, font=get_font('body_italic'))
         self._btn_remind.configure(text=t('remind_later'), font=get_font('button'))
         self._btn_lang.configure(text=t('lang_btn'), font=get_font('lang_btn'))
+        self._clock_lbl.configure(text=self._fmt_clock(), font=get_font('clock'))
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

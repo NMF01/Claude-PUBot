@@ -7,6 +7,7 @@ import logging
 import platform
 import tkinter as tk
 from datetime import datetime, date
+from pathlib import Path
 
 from .storage import Storage, LOCK_FILE
 from .ai_client import AIClient
@@ -53,6 +54,8 @@ class PUBotApp:
         self.root.after(1_000, self._startup_check)
         # Background minute-tick for day-rollover detection
         self.root.after(60_000, self._tick)
+        # Hard restart at midnight for a guaranteed fresh daily slate
+        self.root.after(self._ms_until_midnight(), self._midnight_restart)
 
     # ── Single-instance guard ─────────────────────────────────────────────
 
@@ -89,6 +92,39 @@ class PUBotApp:
             LOCK_FILE.unlink(missing_ok=True)
         except Exception:
             pass
+
+    # ── Midnight restart ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _ms_until_midnight() -> int:
+        """Milliseconds from now until the next 00:00:00."""
+        now = datetime.now()
+        secs = (23 - now.hour) * 3600 + (59 - now.minute) * 60 + (60 - now.second)
+        return max(secs * 1000, 1_000)
+
+    def _midnight_restart(self):
+        """Replace this process with a fresh instance at midnight.
+
+        If a popup is open, defer by one minute so the user can finish;
+        the day-rollover logic in _tick() will still reset state correctly.
+        """
+        if self._setup_shown or self._reminder_up:
+            logging.info('Midnight restart deferred — popup is open.')
+            self.root.after(60_000, self._midnight_restart)
+            return
+
+        logging.info('Midnight restart: replacing process image.')
+        try:
+            self._cleanup()   # release socket before execv so new instance can acquire it
+        except Exception:
+            pass
+
+        main_py = str(Path(__file__).parent.parent / 'main.py')
+        try:
+            os.execv(sys.executable, [sys.executable, main_py])
+        except Exception:
+            logging.exception('os.execv failed — exiting; watchdog will restart.')
+            sys.exit(1)
 
     # ── Scheduling ────────────────────────────────────────────────────────
 

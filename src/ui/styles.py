@@ -55,6 +55,7 @@ FONT_SPECS: dict[str, tuple] = {
     'lang_btn':      (9, 'bold'),
     'celebration_h': (26, 'bold'),
     'celebration_s': (13,),
+    'clock':         (20, 'bold'),
 }
 
 # Convenience alias kept for any code that imports FONTS directly
