@@ -54,6 +54,7 @@ class ReminderWindow:
         # State flags
         self._settings_open:    bool = False
         self._celebration_shown: bool = False
+        self._wrapper:          tk.Frame | None = None
         self._outer:            tk.Frame | None = None
 
         self.data = self.storage.get_today_tasks()
@@ -65,20 +66,21 @@ class ReminderWindow:
 
         win = tk.Toplevel(parent)
         win.title('PUBot')
-        win.configure(bg=COLORS['bg'])
-        win.resizable(False, False)
+        win.configure(bg=COLORS['lockscreen_bg'])
+        win.overrideredirect(True)
         win.attributes('-topmost', True)
-        # X button does nothing — user must interact with the window
         win.protocol('WM_DELETE_WINDOW', lambda: None)
         self.win = win
 
-        self._center(530, 620)
+        # Fullscreen — cover the entire primary screen
+        win.update_idletasks()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f'{sw}x{sh}+0+0')
+
         self._build()
 
-        # Lock the desktop — blackout is created first, popup lifted above it.
-        self._blackout = desktop_lock.lock(parent)
-        if self._blackout:
-            win.lift()
+        desktop_lock.lock(parent)
 
         win.grab_set()
         win.focus_force()
@@ -87,22 +89,17 @@ class ReminderWindow:
         win.after(500, self._keep_on_top)
         self._fetch_ai_message()
 
-    # ── Layout helpers ────────────────────────────────────────────────────
-
-    def _center(self, w: int, h: int):
-        self.win.update_idletasks()
-        sw = self.win.winfo_screenwidth()
-        sh = self.win.winfo_screenheight()
-        self.win.geometry(f'{w}x{h}+{(sw - w)//2}+{(sh - h)//2}')
-
     # ── Main build ────────────────────────────────────────────────────────
 
     def _build(self):
         tasks     = self.data['tasks']
         completed = self.data['completed']
 
-        outer = tk.Frame(self.win, bg=COLORS['bg'], padx=34, pady=24)
-        outer.pack(fill='both', expand=True)
+        self._wrapper = tk.Frame(self.win, bg=COLORS['lockscreen_bg'])
+        self._wrapper.pack(fill='both', expand=True)
+
+        outer = tk.Frame(self._wrapper, bg=COLORS['bg'], padx=34, pady=24)
+        outer.place(relx=0.5, rely=0.5, anchor='center', width=530, height=620)
         self._outer = outer
 
         # ── Top row: gear + lang toggle ───────────────────────────────────
@@ -434,12 +431,12 @@ class ReminderWindow:
             return
         self._celebration_shown = True
 
-        # Hide the task content
+        # Hide the task card and fill the dark wrapper with the celebration screen
         if self._outer:
-            self._outer.pack_forget()
+            self._outer.place_forget()
 
         bg = COLORS['celebration_bg']
-        frame = tk.Frame(self.win, bg=bg)
+        frame = tk.Frame(self._wrapper, bg=bg)
         frame.pack(fill='both', expand=True, padx=0, pady=0)
 
         # Top accent stripe

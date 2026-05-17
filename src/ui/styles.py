@@ -37,6 +37,7 @@ COLORS = {
     'progress_bg':   '#dcfce7',
     'card_bg':       '#f0faf0',
     'celebration_bg':'#f0fdf4',   # very light mint for celebration screen
+    'lockscreen_bg': '#0d1f12',   # dark forest green fullscreen lock background
 }
 
 # ── Font specs — (size, *attrs) without family ────────────────────────────

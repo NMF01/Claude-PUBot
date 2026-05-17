@@ -45,35 +45,33 @@ class DailySetupWindow:
 
         win = tk.Toplevel(parent)
         win.title('PUBot')
-        win.configure(bg=COLORS['bg'])
-        win.resizable(False, False)
+        win.configure(bg=COLORS['lockscreen_bg'])
+        win.overrideredirect(True)
         win.attributes('-topmost', True)
         win.protocol('WM_DELETE_WINDOW', self._refuse_close)
         self.win = win
 
-        self._center(640, 760)
+        # Fullscreen — cover the entire primary screen
+        win.update_idletasks()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f'{sw}x{sh}+0+0')
+
         self._build()
 
-        # Lock the desktop before showing — blackout must be created first,
-        # then the popup lifted above it.
-        blackout = desktop_lock.lock(parent)
-        if blackout:
-            win.lift()          # ensure popup sits above the blackout overlay
+        desktop_lock.lock(parent)
 
         win.grab_set()
         win.focus_force()
 
     # ── Layout ────────────────────────────────────────────────────────────
 
-    def _center(self, w: int, h: int):
-        self.win.update_idletasks()
-        sw = self.win.winfo_screenwidth()
-        sh = self.win.winfo_screenheight()
-        self.win.geometry(f'{w}x{h}+{(sw - w)//2}+{(sh - h)//2}')
-
     def _build(self):
-        outer = tk.Frame(self.win, bg=COLORS['bg'], padx=44, pady=28)
-        outer.pack(fill='both', expand=True)
+        wrapper = tk.Frame(self.win, bg=COLORS['lockscreen_bg'])
+        wrapper.pack(fill='both', expand=True)
+
+        outer = tk.Frame(wrapper, bg=COLORS['bg'], padx=44, pady=28)
+        outer.place(relx=0.5, rely=0.5, anchor='center', width=640, height=760)
 
         # ── Top row: gear + language toggle ───────────────────────────────
         top_row = tk.Frame(outer, bg=COLORS['bg'])

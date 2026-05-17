@@ -1,7 +1,7 @@
 """Windows desktop lock — invoked when a PUBot popup opens.
 
-Three layers of enforcement
-───────────────────────────
+Two layers of enforcement
+─────────────────────────
 1. Keyboard hook (WH_KEYBOARD_LL, runs in its own message-pump thread):
    Blocks Windows key, Alt+Tab, Alt+F4, Alt+Esc, Alt+Space, Ctrl+Esc,
    and Ctrl+Shift+Esc (Task Manager) so the user cannot keyboard-navigate
@@ -10,11 +10,8 @@ Three layers of enforcement
 2. Taskbar hidden:
    FindWindowW('Shell_TrayWnd') → ShowWindow(SW_HIDE).  Restored on unlock.
 
-3. Fullscreen blackout overlay:
-   A nearly-invisible Toplevel that covers the entire screen sits below the
-   popup.  Any click that lands outside the popup hits the blackout window,
-   which absorbs the event and does nothing — preventing clicks from reaching
-   whatever application sits behind PUBot.
+The popup windows themselves are fullscreen (overrideredirect + full screen
+geometry), so the OS cannot route mouse clicks to any other application.
 
 On non-Windows platforms every function is a no-op so the rest of the code
 does not need platform guards.
@@ -70,7 +67,6 @@ if _IS_WIN:
 _hook_handle: object = None   # HHOOK
 _hook_fn:     object = None   # HOOKPROC — must stay alive or callback is GC'd
 _hook_tid:    int    = 0
-_blackout_win: object = None  # tk.Toplevel | None
 _locked:      bool   = False
 
 
@@ -166,21 +162,20 @@ def _hook_thread_main():
 
 # ── Public API ────────────────────────────────────────────────────────────
 
-def lock(tk_root: tk.Misc) -> 'tk.Toplevel | None':
-    """Activate the desktop lock.
+def lock(tk_root: tk.Misc) -> None:
+    """Activate the desktop lock: hide the taskbar and install the keyboard hook.
 
-    Returns the blackout Toplevel so the caller can lift its popup above it.
-    Returns None on non-Windows platforms.
-
-    Call unlock() when the popup is destroyed.
+    The popup windows are fullscreen (overrideredirect), so no blackout overlay
+    is needed — the popup IS the screen.  Call unlock() when the popup closes.
+    No-op on non-Windows platforms.
     """
-    global _locked, _blackout_win
+    global _locked
 
     if not _IS_WIN:
-        return None
+        return
 
     if _locked:
-        return _blackout_win
+        return
 
     _locked = True
 
@@ -190,31 +185,7 @@ def lock(tk_root: tk.Misc) -> 'tk.Toplevel | None':
         _user32.ShowWindow(hwnd, _SW_HIDE)
         logging.info('desktop_lock: taskbar hidden.')
 
-    # 2. Fullscreen blackout overlay (nearly invisible, absorbs mouse clicks)
-    bo = tk.Toplevel(tk_root)
-    bo.overrideredirect(True)          # no title bar
-    bo.attributes('-topmost', True)
-    bo.attributes('-alpha', 0.01)      # just enough to receive events; user still
-    bo.configure(bg='black')           # sees the desktop clearly
-    # Cover the full virtual screen (handles multi-monitor setups)
-    sw = bo.winfo_screenwidth()
-    sh = bo.winfo_screenheight()
-    # Try to span all monitors via the virtual screen dimensions
-    try:
-        vx = _user32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
-        vy = _user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
-        vw = _user32.GetSystemMetrics(78)   # SM_CXVIRTUALSCREEN
-        vh = _user32.GetSystemMetrics(79)   # SM_CYVIRTUALSCREEN
-        bo.geometry(f'{vw}x{vh}+{vx}+{vy}')
-    except Exception:
-        bo.geometry(f'{sw}x{sh}+0+0')
-    bo.protocol('WM_DELETE_WINDOW', lambda: None)
-    # Absorb clicks silently
-    for btn in ('<Button-1>', '<Button-2>', '<Button-3>', '<Double-Button-1>'):
-        bo.bind(btn, lambda e: 'break')
-    _blackout_win = bo
-
-    # 3. Low-level keyboard hook (needs its own message pump thread)
+    # 2. Low-level keyboard hook (needs its own message pump thread)
     t = threading.Thread(
         target=_hook_thread_main,
         daemon=True,
@@ -223,25 +194,16 @@ def lock(tk_root: tk.Misc) -> 'tk.Toplevel | None':
     t.start()
 
     logging.info('desktop_lock: locked.')
-    return bo
 
 
 def unlock():
     """Release the desktop lock. Safe to call even if not currently locked."""
-    global _locked, _blackout_win, _hook_tid
+    global _locked, _hook_tid
 
     if not _IS_WIN or not _locked:
         return
 
     _locked = False
-
-    # Destroy the blackout overlay
-    if _blackout_win is not None:
-        try:
-            _blackout_win.destroy()
-        except Exception:
-            pass
-        _blackout_win = None
 
     # Restore the taskbar
     hwnd = _taskbar_hwnd()
