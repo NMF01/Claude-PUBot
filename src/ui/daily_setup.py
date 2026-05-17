@@ -47,15 +47,10 @@ class DailySetupWindow:
         win.title('PUBot')
         win.configure(bg=COLORS['lockscreen_bg'])
         win.overrideredirect(True)
+        win.attributes('-fullscreen', True)
         win.attributes('-topmost', True)
         win.protocol('WM_DELETE_WINDOW', self._refuse_close)
         self.win = win
-
-        # Fullscreen — cover the entire primary screen
-        win.update_idletasks()
-        sw = win.winfo_screenwidth()
-        sh = win.winfo_screenheight()
-        win.geometry(f'{sw}x{sh}+0+0')
 
         self._build()
 
